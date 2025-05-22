@@ -1,7 +1,8 @@
 import { Address } from '@massalabs/massa-as-sdk';
 import { Args } from '@massalabs/as-types';
 
-import { u128 } from 'as-bignum/assembly';
+import { u256 } from 'as-bignum/assembly';
+import { SafeMath, SafeMath256 } from '../libraries/SafeMath';
 
 const MAX_TAG_LEN: i32 = 127;
 
@@ -10,9 +11,10 @@ const MAX_TAG_LEN: i32 = 127;
  */
 export class VestingSessionInfo {
   toAddr: Address;
-  totalAmount: u64;
+  tokenAddr: Address;
+  totalAmount: u256;
   startTimestamp: u64;
-  initialReleaseAmount: u64;
+  initialReleaseAmount: u256;
   cliffDuration: u64;
   linearDuration: u64;
   tag: string;
@@ -22,14 +24,17 @@ export class VestingSessionInfo {
     this.toAddr = argsObj
       .nextSerializable<Address>()
       .expect('Missing to_addr argument.');
+    this.tokenAddr = argsObj
+      .nextSerializable<Address>()
+      .expect('Missing token_Addr argument.');
     this.totalAmount = argsObj
-      .nextU64()
+      .nextU256()
       .expect('Missing total_amount argument.');
     this.startTimestamp = argsObj
       .nextU64()
       .expect('Missing start_timestamp argument.');
     this.initialReleaseAmount = argsObj
-      .nextU64()
+      .nextU256()
       .expect('Missing initial_release_amount argument.');
     this.cliffDuration = argsObj
       .nextU64()
@@ -58,10 +63,10 @@ export class VestingSessionInfo {
    * @param currentTimestamp - current timestamp
    * @returns the amount that has been unlocked at the given timestamp
    */
-  public getUnlockedAt(timestamp: u64): u64 {
+  public getUnlockedAt(timestamp: u64): u256 {
     // before activation
     if (timestamp < this.startTimestamp) {
-      return 0;
+      return u256.Zero;
     }
 
     // during cliff
@@ -70,8 +75,10 @@ export class VestingSessionInfo {
     }
 
     // time after cliff end
-    const timeAfterCliffEnd =
-      timestamp - this.startTimestamp - this.cliffDuration;
+    const timeAfterCliffEnd = SafeMath.sub(
+      SafeMath.sub(timestamp, this.startTimestamp),
+      this.cliffDuration,
+    );
 
     // after linear release
     if (timeAfterCliffEnd >= this.linearDuration) {
@@ -80,17 +87,19 @@ export class VestingSessionInfo {
     }
 
     // total amount to be released linearly
-    const linearAmount = this.totalAmount - this.initialReleaseAmount;
+    const linearAmount = SafeMath256.sub(
+      this.totalAmount,
+      this.initialReleaseAmount,
+    );
 
     // amount released linearly so far
-    // use unsigned 128 bit integer to avoid overflow
 
-    const linearReleased = (
-      (u128.fromU64(linearAmount) * u128.fromU64(timeAfterCliffEnd)) /
-      u128.fromU64(this.linearDuration)
-    ).toU64();
+    const linearReleased = SafeMath256.div(
+      SafeMath256.mul(linearAmount, u256.from(timeAfterCliffEnd)),
+      u256.from(this.linearDuration),
+    );
 
     // total released amount until timestamp
-    return this.initialReleaseAmount + linearReleased;
+    return SafeMath256.add(this.initialReleaseAmount, linearReleased);
   }
 }

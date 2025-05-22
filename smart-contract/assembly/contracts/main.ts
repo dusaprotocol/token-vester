@@ -1,13 +1,17 @@
 // The entry file of your WebAssembly module.
 import {
+  Address,
   Context,
   Storage,
   balance,
+  call,
+  functionExists,
+  isAddressEoa,
   transferCoins,
 } from '@massalabs/massa-as-sdk';
 import { Args } from '@massalabs/as-types';
-
-import { u128 } from 'as-bignum/assembly';
+import { IERC20 } from '../interfaces/IERC20';
+import { u256 } from 'as-bignum/assembly';
 
 import {
   createUniqueId,
@@ -15,6 +19,7 @@ import {
   getClaimedAmountKey,
 } from './utils';
 import { VestingSessionInfo } from './vesting';
+import { SafeMath, SafeMath256 } from '../libraries/SafeMath';
 
 /**
  * This function is meant to be called only one time: when the contract is deployed.
@@ -24,60 +29,39 @@ export function constructor(_: StaticArray<u8>): StaticArray<u8> {
 }
 
 /**
- * Consolidate the necessary payment (including storage fees) to and from the caller.
- * @param initialSCBalance - The balance of the SC at the beginning of the call
- * @param internalSCCredits - Non-storage coins expected to have been received by the SC during the call
- * @param internalSCDebits - Non-storage coins expected to have been sent by the SC during the call
- * @param callerCredit - Non-storage coins expected to have been credited to the caller during the call
- * @param callerDebit - Non-storage coins expected to have been send by the caller to the SC for the call
+ * @notice Function to transfer remaining Massa coins to a recipient at the end of a call
+ * @param balanceInit Initial balance of the SC (transferred coins + balance of the SC)
+ * @param balanceFinal Balance of the SC at the end of the call
+ * @param sent Number of coins sent to the SC
+ * @param to Caller of the function to transfer the remaining coins to
  */
-function consolidatePayment(
-  initialSCBalance: u64,
-  internalSCCredits: u64,
-  internalSCDebits: u64,
-  callerCredit: u64,
-  callerDebit: u64,
+function transferRemaining(
+  balanceInit: u64,
+  balanceFinal: u64,
+  sent: u64,
+  to: Address,
 ): void {
-  // How much we charge the caller:
-  // caller_cost = initial_sc_balance + internal_sc_credits + caller_debit - internal_sc_debits - caller_credit - get_balance()
-  const callerCostPos: u128 =
-    u128.fromU64(initialSCBalance) +
-    u128.fromU64(internalSCCredits) +
-    u128.fromU64(callerDebit);
-  const callerCostNeg: u128 =
-    u128.fromU64(internalSCDebits) +
-    u128.fromU64(callerCredit) +
-    u128.fromU64(balance());
-  const callerPayment: u128 = u128.fromU64(Context.transferredCoins());
-
-  if (callerCostPos >= callerCostNeg) {
-    // caller needs to pay
-    const callerCost: u128 = callerCostPos - callerCostNeg;
-    if (callerPayment < callerCost) {
-      // caller did not pay enough
-      throw new Error(
-        'Need at least ' +
-          callerCost.toString() +
-          ' elementary coin units to pay but only ' +
-          callerPayment.toString() +
-          ' were sent.',
-      );
-    } else if (callerPayment > callerCost) {
-      // caller paid too much: send remainder back
-      const delta: u128 = callerPayment - callerCost;
-      if (delta > u128.fromU64(u64.MAX_VALUE)) {
-        throw new Error('Overflow');
-      }
-      transferCoins(Context.caller(), delta.toU64());
+  if (balanceInit >= balanceFinal) {
+    // Some operation might spend Massa by creating new storage space
+    const spent = SafeMath.sub(balanceInit, balanceFinal);
+    assert(spent <= sent, 'Storage__NotEnoughCoinsSent');
+    if (spent < sent) {
+      // SafeMath not needed as spent is always less than sent
+      const remaining: u64 = sent - spent;
+      _transferRemaining(to, remaining);
     }
   } else {
-    // caller needs to be paid
-    const delta: u128 = callerCostNeg - callerCostPos + callerPayment;
-    if (delta > u128.fromU64(u64.MAX_VALUE)) {
-      throw new Error('Overflow');
-    }
-    transferCoins(Context.caller(), delta.toU64());
+    // Some operation might unlock Massa by deleting storage space
+    const received = SafeMath.sub(balanceFinal, balanceInit);
+    const totalToSend: u64 = SafeMath.add(sent, received);
+    _transferRemaining(to, totalToSend);
   }
+}
+
+function _transferRemaining(to: Address, value: u64): void {
+  if (!isAddressEoa(to.toString()) && functionExists(to, 'receiveCoins'))
+    call(to, 'receiveCoins', new Args(), value);
+  else transferCoins(to, value);
 }
 
 /**
@@ -88,6 +72,7 @@ function consolidatePayment(
 export function createVestingSession(args: StaticArray<u8>): StaticArray<u8> {
   // get the initial balance of the smart contract
   const initialSCBalance = balance();
+  const sent = Context.transferredCoins();
 
   // deserialize object
   const vInfo = new VestingSessionInfo(args);
@@ -99,14 +84,21 @@ export function createVestingSession(args: StaticArray<u8>): StaticArray<u8> {
   Storage.set(getVestingInfoKey(vInfo.toAddr, sessionId), args);
 
   // initialize the claimed coin counter
-  const initialCounterValue: u64 = 0;
+  const initialCounterValue: u256 = u256.Zero;
   Storage.set(
     getClaimedAmountKey(vInfo.toAddr, sessionId),
     new Args().add(initialCounterValue).serialize(),
   );
 
+  // Transfer the tokens to the contract
+  new IERC20(vInfo.tokenAddr).transferFrom(
+    Context.caller(),
+    Context.callee(),
+    vInfo.totalAmount,
+  );
+
   // consolidate payment
-  consolidatePayment(initialSCBalance, 0, 0, 0, vInfo.totalAmount);
+  transferRemaining(initialSCBalance, balance(), sent, Context.caller());
 
   // return session ID
   return new Args().add(sessionId).serialize();
@@ -120,11 +112,12 @@ export function createVestingSession(args: StaticArray<u8>): StaticArray<u8> {
 export function claimVestingSession(args: StaticArray<u8>): StaticArray<u8> {
   // get the initial balance of the smart contract
   const initialSCBalance = balance();
+  const sent = Context.transferredCoins();
 
   // deserialize arguments
   let deser = new Args(args);
   const sessionId = deser.nextU64().expect('Missing session_id argument.');
-  const amount = deser.nextU64().expect('Missing amount argument.');
+  const amount = deser.nextU256().expect('Missing amount argument.');
   if (deser.offset !== args.length) {
     throw new Error(
       `Extra data in serialized args (len: ${args.length}) after session id and amount, aborting...`,
@@ -141,11 +134,14 @@ export function claimVestingSession(args: StaticArray<u8>): StaticArray<u8> {
   );
   const claimedAmountKey = getClaimedAmountKey(addr, sessionId);
   const claimedAmount = new Args(Storage.get(claimedAmountKey))
-    .nextU64()
+    .nextU256()
     .unwrap();
 
   // compute the claimable amount of coins
-  const claimableAmount = vestingInfo.getUnlockedAt(timestamp) - claimedAmount;
+  const claimableAmount = SafeMath256.sub(
+    vestingInfo.getUnlockedAt(timestamp),
+    claimedAmount,
+  );
 
   // check amount
   if (amount > claimableAmount) {
@@ -155,14 +151,14 @@ export function claimVestingSession(args: StaticArray<u8>): StaticArray<u8> {
   // update the claimed amount
   Storage.set(
     claimedAmountKey,
-    new Args().add(claimedAmount + amount).serialize(),
+    new Args().add(SafeMath256.add(claimedAmount, amount)).serialize(),
   );
 
   // transfer the coins to the claimer
-  transferCoins(addr, amount);
+  new IERC20(vestingInfo.tokenAddr).transfer(addr, amount);
 
   // consolidate payment
-  consolidatePayment(initialSCBalance, 0, amount, 0, 0);
+  transferRemaining(initialSCBalance, balance(), sent, Context.caller());
 
   return [];
 }
@@ -175,6 +171,7 @@ export function claimVestingSession(args: StaticArray<u8>): StaticArray<u8> {
 export function clearVestingSession(args: StaticArray<u8>): StaticArray<u8> {
   // get the initial balance of the smart contract
   const initialSCBalance = balance();
+  const sent = Context.transferredCoins();
 
   // deserialize arguments
   let deser = new Args(args);
@@ -191,7 +188,7 @@ export function clearVestingSession(args: StaticArray<u8>): StaticArray<u8> {
   const vestingInfo = new VestingSessionInfo(Storage.get(vestingInfoKey));
   const claimedAmountKey = getClaimedAmountKey(addr, sessionId);
   const claimedAmount = new Args(Storage.get(claimedAmountKey))
-    .nextU64()
+    .nextU256()
     .unwrap();
 
   // check that everything was claimed
@@ -204,7 +201,7 @@ export function clearVestingSession(args: StaticArray<u8>): StaticArray<u8> {
   Storage.del(claimedAmountKey);
 
   // consolidate payment
-  consolidatePayment(initialSCBalance, 0, 0, 0, 0);
+  transferRemaining(initialSCBalance, balance(), sent, Context.caller());
 
   return [];
 }

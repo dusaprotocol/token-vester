@@ -2,6 +2,7 @@ import { Address, resetStorage, Storage } from '@massalabs/massa-as-sdk';
 import { Args } from '@massalabs/as-types';
 import { createUniqueId } from '../contracts/utils';
 import { VestingSessionInfo } from '../contracts/vesting';
+import { u256 } from 'as-bignum/assembly';
 
 /**
  * Serialize vesting info.
@@ -16,15 +17,17 @@ import { VestingSessionInfo } from '../contracts/vesting';
  */
 function serializeVestingInfo(
   toAddr: Address,
-  totalAmount: u64,
+  tokenAddr: Address,
+  totalAmount: u256,
   startTimestamp: u64,
-  initialReleaseAmount: u64,
+  initialReleaseAmount: u256,
   cliffDuration: u64,
   linearDuration: u64,
   tag: String,
 ): StaticArray<u8> {
   return new Args()
     .add(toAddr)
+    .add(tokenAddr)
     .add(totalAmount)
     .add(startTimestamp)
     .add(initialReleaseAmount)
@@ -81,15 +84,19 @@ describe('Vesting session info', () => {
     const addr1 = new Address(
       'AU12UBnqTHDQALpocVBnkPNy7y5CndUJQTLutaVDDFgMJcq5kQiKq',
     );
+    const tokenAddr = new Address(
+      'AS12FW5Rs5YN2zdpEnqwj4iHUUPt9R4Eqjq2qtpJFNKW3mn33RuLU',
+    );
 
-    let totalAmount: u64 = 420;
-    let initialReleaseAmount: u64 = 220;
+    let totalAmount: u256 = u256.from(420);
+    let initialReleaseAmount: u256 = u256.from(220);
     let startTimestamp: u64 = 5;
     let cliffDuration: u64 = 10;
     let linearDuration: u64 = 10;
     let tag = '42';
     let sessionArgs = serializeVestingInfo(
       addr1,
+      tokenAddr,
       totalAmount,
       startTimestamp,
       initialReleaseAmount,
@@ -101,8 +108,8 @@ describe('Vesting session info', () => {
     let svi = new VestingSessionInfo(sessionArgs);
 
     // Test amount release before startTimestamp
-    expect<u64>(svi.getUnlockedAt(0)).toBe(0);
-    expect<u64>(svi.getUnlockedAt(1)).toBe(0);
+    expect<u256>(svi.getUnlockedAt(0)).toBe(u256.Zero);
+    expect<u256>(svi.getUnlockedAt(1)).toBe(u256.Zero);
     expect(svi.getUnlockedAt(5)).toBe(initialReleaseAmount);
 
     // Test amount release during cliff
@@ -111,8 +118,8 @@ describe('Vesting session info', () => {
 
     // Test linear release
     for (let i: u64 = 0; i < linearDuration + 1; i++) {
-      expect<u64>(svi.getUnlockedAt(startTimestamp + cliffDuration + i)).toBe(
-        initialReleaseAmount + i * 20,
+      expect<u256>(svi.getUnlockedAt(startTimestamp + cliffDuration + i)).toBe(
+        initialReleaseAmount + u256.from(i * 20),
       );
     }
 
@@ -127,15 +134,19 @@ describe('Vesting session info', () => {
     const addr1 = new Address(
       'AU12UBnqTHDQALpocVBnkPNy7y5CndUJQTLutaVDDFgMJcq5kQiKq',
     );
+    const tokenAddr = new Address(
+      'AS12FW5Rs5YN2zdpEnqwj4iHUUPt9R4Eqjq2qtpJFNKW3mn33RuLU',
+    );
 
-    let totalAmount: u64 = 420;
-    let initialReleaseAmount: u64 = 220;
+    let totalAmount: u256 = u256.from(420);
+    let initialReleaseAmount: u256 = u256.from(220);
     let startTimestamp: u64 = 5;
     let cliffDuration: u64 = 10;
     let linearDuration: u64 = 10;
     let tag = '2'.repeat(200);
     let sessionArgs = serializeVestingInfo(
       addr1,
+      tokenAddr,
       totalAmount,
       startTimestamp,
       initialReleaseAmount,
@@ -151,15 +162,19 @@ describe('Vesting session info', () => {
     const addr1 = new Address(
       'AU12UBnqTHDQALpocVBnkPNy7y5CndUJQTLutaVDDFgMJcq5kQiKq',
     );
+    const tokenAddr = new Address(
+      'AS12FW5Rs5YN2zdpEnqwj4iHUUPt9R4Eqjq2qtpJFNKW3mn33RuLU',
+    );
 
-    let totalAmount: u64 = 420;
-    let initialReleaseAmount: u64 = 220;
+    let totalAmount: u256 = u256.from(420);
+    let initialReleaseAmount: u256 = u256.from(220);
     let startTimestamp: u64 = 5;
     let cliffDuration: u64 = 10;
     let linearDuration: u64 = u64.MAX_VALUE;
     let tag = '4242';
     let sessionArgs = serializeVestingInfo(
       addr1,
+      tokenAddr,
       totalAmount,
       startTimestamp,
       initialReleaseAmount,
@@ -171,8 +186,8 @@ describe('Vesting session info', () => {
     let svi = new VestingSessionInfo(sessionArgs);
 
     // Test amount release before startTimestamp
-    expect<u64>(svi.getUnlockedAt(0)).toBe(0);
-    expect<u64>(svi.getUnlockedAt(1)).toBe(0);
+    expect<u256>(svi.getUnlockedAt(0)).toBe(u256.Zero);
+    expect<u256>(svi.getUnlockedAt(1)).toBe(u256.Zero);
     expect(svi.getUnlockedAt(5)).toBe(initialReleaseAmount);
 
     // Test amount release during cliff
@@ -187,10 +202,13 @@ describe('Vesting session info', () => {
     const addr1 = new Address(
       'AU12UBnqTHDQALpocVBnkPNy7y5CndUJQTLutaVDDFgMJcq5kQiKq',
     );
+    const tokenAddr = new Address(
+      'AS12FW5Rs5YN2zdpEnqwj4iHUUPt9R4Eqjq2qtpJFNKW3mn33RuLU',
+    );
 
-    let totalAmount: u64 = 420;
+    let totalAmount: u256 = u256.from(420);
     // Note: init release amount > total amount - this should error
-    let initialReleaseAmount: u64 = 520;
+    let initialReleaseAmount: u256 = u256.from(520);
     let startTimestamp: u64 = 5;
     // let cliffDuration = u64.MAX_VALUE;
     let cliffDuration: u64 = 10;
@@ -198,6 +216,7 @@ describe('Vesting session info', () => {
     let tag = '42';
     let sessionArgs = serializeVestingInfo(
       addr1,
+      tokenAddr,
       totalAmount,
       startTimestamp,
       initialReleaseAmount,
@@ -224,11 +243,14 @@ describe('Scenarios', () => {
       'AU12UBnqTHDQALpocVBnkPNy7y5CndUJQTLutaVDDFgMJcq5kQiKq',
     );
     // AS12BqZEQ6sByhRLyEuf0YbQmcF2PsDdkNNG1akBJu9XcjZA1eT
+    const tokenAddr = new Address(
+      'AS12FW5Rs5YN2zdpEnqwj4iHUUPt9R4Eqjq2qtpJFNKW3mn33RuLU',
+    );
 
     // const res = call(addr, 'createVestingSession', NoArg, 0);
 
-    let totalAmount: u64 = 420;
-    let initialReleaseAmount: u64 = 220;
+    let totalAmount: u256 = u256.from(420);
+    let initialReleaseAmount: u256 = u256.from(220);
     let startTimestamp: u64 = 0;
     let cliffDuration: u64 = 10;
     let linearDuration: u64 = 5;
@@ -236,6 +258,7 @@ describe('Scenarios', () => {
 
     serializeVestingInfo(
       addr1,
+      tokenAddr,
       totalAmount,
       startTimestamp,
       initialReleaseAmount,
