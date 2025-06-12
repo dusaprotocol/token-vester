@@ -1,10 +1,23 @@
-import {Client} from "@massalabs/massa-web3";
+import { Args, Provider, SmartContract } from "@massalabs/massa-web3";
+import * as dotenv from 'dotenv';
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import path from 'path';
+
+dotenv.config();
+
+export function getScByteCode(folderName: string, fileName: string): Buffer {
+  // Obtain the current file name and directory paths
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = path.dirname(path.dirname(__filename));
+  return readFileSync(path.join(__dirname, folderName, fileName));
+}
 
 export async function getDynamicCosts(
-    client: Client,
+    provider: Provider,
     targetAddress: string,
     targetFunction: string,
-    parameter: number[],
+    parameter: Args,
 ): Promise<bigint> {
 
     const MAX_GAS = 4294167295; // Max gas for an op on Massa blockchain
@@ -14,18 +27,14 @@ export async function getDynamicCosts(
     // let estimatedStorageCost: number = 0;
     // const storage_cost_margin = 1.1;
 
+    const sc = new SmartContract(provider, targetAddress);
     try {
-        const readOnlyCall = await client.smartContracts().readSmartContract({
-            targetAddress: targetAddress,
-            targetFunction: targetFunction,
-            parameter,
-            maxGas: BigInt(MAX_GAS),
-        });
+        const readOnlyCall = await sc.read(targetFunction, parameter);
         console.log("readOnlyCall:", readOnlyCall);
-        console.log("events", readOnlyCall.info.output_events);
+        console.log("events", readOnlyCall.info.events);
         console.log("===");
 
-        estimatedGas = BigInt(Math.min(Math.floor(readOnlyCall.info.gas_cost * gas_margin), MAX_GAS));
+        estimatedGas = BigInt(Math.min(Math.floor(readOnlyCall.info.gasCost * gas_margin), MAX_GAS));
         // let filteredEvents = readOnlyCall.info.output_events.filter((e) => e.data.includes(prefix));
         // // console.log("filteredEvents:", filteredEvents);
         // estimatedStorageCost = Math.floor(
