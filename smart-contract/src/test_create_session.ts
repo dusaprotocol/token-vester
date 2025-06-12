@@ -1,48 +1,48 @@
 import {
-    Account,
-    Args,
-    Mas,
-    SmartContract,
-    Web3Provider,
-  } from '@massalabs/massa-web3';
-  
-  const account = await Account.fromEnv();
-  console.log(account.address.toString());
-  const provider = Web3Provider.mainnet(account);
+  Account,
+  Args,
+  Mas,
+  SmartContract,
+  Web3Provider,
+} from '@massalabs/massa-web3';
 
-  const sc_addr = process.env.SC_ADDR;
-  if (!sc_addr) {
-    throw new Error('Missing SC_ADDR in .env file');
-  }
+const account = await Account.fromEnv();
+console.log(account.address.toString());
+const provider = Web3Provider.mainnet(account);
 
-  // let sc_addr = "AS1VtQNYyHacsykHtCVP9CeYPB4oE4QmPvetfqqn9hb1PMLeNbmN";
-  // let sc_addr = "AS12tx6aLtn6GWVB9i9NRzD5GEkUezbKQYsxvdmUaKqVgNgo6sZ2f";
+const sc_addr = process.env.SC_ADDR;
+if (!sc_addr) {
+  throw new Error('Missing SC_ADDR in .env file');
+}
 
-  console.log("Creating a Vesting session...");
+// let sc_addr = "AS1VtQNYyHacsykHtCVP9CeYPB4oE4QmPvetfqqn9hb1PMLeNbmN";
+// let sc_addr = "AS12tx6aLtn6GWVB9i9NRzD5GEkUezbKQYsxvdmUaKqVgNgo6sZ2f";
 
-  // let timedelta = 60 * 60 * 1000; // 1 hour
-  let timedelta = 0;
- 
-  // Placeholder function for send logic
-  let serialized_arg = new Args();
-  let sendToAddr = "AU1x5PzpZCyf93HAMhYV4VpmgMr8PNrAs1QDbEXVMGmeHvzrZqjY";
-  let sendTotalAmount = BigInt(198);
-  let sendStartTimestamp = BigInt(Date.now() + timedelta);
-  let sendInitialReleaseAmount = BigInt(50);
-  let sendCliffDuration = BigInt(1000);
-  let sendLinearDuration = BigInt(1000);
-  let sendTag = "testw3 t8";
+console.log('Creating a Vesting session...');
 
-  serialized_arg.addString(sendToAddr);
-  serialized_arg.addU64(sendTotalAmount);
-  serialized_arg.addU64(sendStartTimestamp);
-  serialized_arg.addU64(sendInitialReleaseAmount);
-  serialized_arg.addU64(sendCliffDuration);
-  serialized_arg.addU64(sendLinearDuration);
-  serialized_arg.addString(sendTag);
-  let serialized = serialized_arg.serialize();
-  
-  // Estimate gas cost & storage cost
+// let timedelta = 60 * 60 * 1000; // 1 hour
+let timedelta = 0;
+
+// Placeholder function for send logic
+let serialized_arg = new Args();
+let sendToAddr = 'AU1x5PzpZCyf93HAMhYV4VpmgMr8PNrAs1QDbEXVMGmeHvzrZqjY';
+let sendTotalAmount = BigInt(198);
+let sendStartTimestamp = BigInt(Date.now() + timedelta);
+let sendInitialReleaseAmount = BigInt(50);
+let sendCliffDuration = BigInt(1000);
+let sendLinearDuration = BigInt(1000);
+let sendTag = 'testw3 t8';
+
+serialized_arg.addString(sendToAddr);
+serialized_arg.addU64(sendTotalAmount);
+serialized_arg.addU64(sendStartTimestamp);
+serialized_arg.addU64(sendInitialReleaseAmount);
+serialized_arg.addU64(sendCliffDuration);
+serialized_arg.addU64(sendLinearDuration);
+serialized_arg.addString(sendTag);
+let serialized = serialized_arg.serialize();
+
+// Estimate gas cost & storage cost
 // waiting for ReadSC + coins
 /*
 let gas_cost = await getDynamicCosts(
@@ -66,17 +66,17 @@ let op_fee = BigInt(1);
 
 const sc = new SmartContract(provider, sc_addr);
 
-let op = await sc.call("createVestingSession", serialized,
-    { maxGas: gas_cost,
-    coins: sendTotalAmount + BigInt(storage_cost_fees),
-    fee: op_fee
-    });
+let op = await sc.call('createVestingSession', serialized, {
+  maxGas: gas_cost,
+  coins: sendTotalAmount + BigInt(storage_cost_fees),
+  fee: op_fee,
+});
 
-console.log("Done creating a Vesting session:", op.id);
+console.log('Done creating a Vesting session:', op.id);
 
-  const events = await provider.getEvents({
-    smartContractAddress: sc_addr,
-  });
-  for (const event of events) {
-    console.log('Event message:', event.data);
-  }
+const events = await provider.getEvents({
+  smartContractAddress: sc_addr,
+});
+for (const event of events) {
+  console.log('Event message:', event.data);
+}
